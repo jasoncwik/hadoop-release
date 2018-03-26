@@ -25,6 +25,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.RecursiveAction;
 
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -66,6 +68,8 @@ abstract public class Command extends Configured {
   public PrintStream err = System.err;
   /** allows the command factory to be used if necessary */
   private CommandFactory commandFactory = null;
+
+  protected ForkJoinPool pool;
 
   /** Constructor */
   protected Command() {
@@ -143,7 +147,7 @@ abstract public class Command extends Configured {
    *      \-> {@link #processArguments(LinkedList)}
    *          |-> {@link #processArgument(PathData)}*
    *          |   |-> {@link #processPathArgument(PathData)}
-   *          |   \-> {@link #processPaths(PathData, PathData...)}
+   *          |   \-> {processPaths(PathData, PathData...)}
    *          |        \-> {@link #processPath(PathData)}*
    *          \-> {@link #processNonexistentPath(PathData)}
    * </pre>
@@ -162,6 +166,13 @@ abstract public class Command extends Configured {
             "DEPRECATED: Please use '"+ getReplacementCommand() + "' instead.");
       }
       processOptions(args);
+      int threads = getConf().getInt("fs.threads", -1);
+      if(threads != -1) {
+        pool = new ForkJoinPool(threads);
+      } else {
+        // Default is number of cores.
+        pool = new ForkJoinPool();
+      }
       processRawArguments(args);
     } catch (IOException e) {
       displayError(e);
@@ -276,7 +287,7 @@ abstract public class Command extends Configured {
 
   /**
    *  This is the last chance to modify an argument before going into the
-   *  (possibly) recursive {@link #processPaths(PathData, PathData...)}
+   *  (possibly) recursive ProcessPathsAction(PathData, PathData...)}
    *  -> {@link #processPath(PathData)} loop.  Ex.  ls and du use this to
    *  expand out directories.
    *  @param item a {@link PathData} representing a path which exists
@@ -286,7 +297,8 @@ abstract public class Command extends Configured {
     // null indicates that the call is not via recursion, ie. there is
     // no parent directory that was expanded
     depth = 0;
-    processPaths(null, item);
+    pool.invoke(new ProcessPathsAction(null, Arrays.asList(item)));
+    //processPaths(null, item);
   }
   
   /**
@@ -312,17 +324,7 @@ abstract public class Command extends Configured {
   protected void processPaths(PathData parent, PathData ... items)
   throws IOException {
     // TODO: this really should be iterative
-    for (PathData item : items) {
-      try {
-        processPath(item);
-        if (recursive && isPathRecursable(item)) {
-          recursePath(item);
-        }
-        postProcessPath(item);
-      } catch (IOException e) {
-        displayError(e);
-      }
-    }
+    pool.invoke(new ProcessPathsAction(parent, Arrays.asList(items)));
   }
 
   /**
@@ -489,5 +491,48 @@ abstract public class Command extends Configured {
           "failed to get " + this.getClass().getSimpleName()+"."+field, e);
     }
     return value;
+  }
+
+  protected class ProcessPathsAction extends RecursiveAction {
+    private List<PathData> items;
+    private PathData parent;
+
+    public ProcessPathsAction(PathData parent, List<PathData> items) {
+      this.parent = parent;
+      this.items = items;
+    }
+
+    public void compute() {
+      List<ProcessPathAction> children = new ArrayList<>();
+      for (PathData item : items) {
+        children.add(new ProcessPathAction(item));
+      }
+      invokeAll(children);
+    }
+
+
+  }
+
+  protected class ProcessPathAction extends RecursiveAction {
+    private PathData item;
+
+    public ProcessPathAction(PathData item) {
+      this.item = item;
+    }
+
+    public void compute() {
+      try {
+        processPath(item);
+        if (recursive && isPathRecursable(item)) {
+          recursePath(item);
+        }
+        postProcessPath(item);
+      } catch (IOException e) {
+        displayError(e);
+      }
+
+    }
+
+
   }
 }

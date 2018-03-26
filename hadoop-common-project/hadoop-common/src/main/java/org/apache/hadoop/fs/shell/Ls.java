@@ -239,7 +239,7 @@ class Ls extends FsCommand {
   }
 
   @Override
-  protected void processPath(PathData item) throws IOException {
+  protected synchronized void processPath(PathData item) throws IOException {
     if (pathOnly) {
       out.println(item.toString());
       return;
@@ -263,7 +263,7 @@ class Ls extends FsCommand {
    * Compute column widths and rebuild the format string
    * @param items to find the max field width for each column
    */
-  private void adjustColumnWidths(PathData items[]) {
+  private synchronized void adjustColumnWidths(PathData items[]) {
     for (PathData item : items) {
       FileStatus stat = item.stat;
       maxRepl  = maxLength(maxRepl, stat.getReplication());

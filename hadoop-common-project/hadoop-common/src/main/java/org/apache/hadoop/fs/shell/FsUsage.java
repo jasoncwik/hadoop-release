@@ -93,13 +93,15 @@ class FsUsage extends FsCommand {
       long used = fsStats.getUsed();
       long free = fsStats.getRemaining();
 
-      usagesTable.addRow(
-          item.fs.getUri(),
-          formatSize(size),
-          formatSize(used),
-          formatSize(free),
-          StringUtils.formatPercent((double)used/(double)size, 0)
-      );
+      synchronized (usagesTable) {
+        usagesTable.addRow(
+                item.fs.getUri(),
+                formatSize(size),
+                formatSize(used),
+                formatSize(free),
+                StringUtils.formatPercent((double) used / (double) size, 0)
+        );
+      }
     }
   }
 
@@ -150,7 +152,9 @@ class FsUsage extends FsCommand {
       } else {
         length = item.stat.getLen();
       }
-      usagesTable.addRow(formatSize(length), item);
+      synchronized (usagesTable) {
+        usagesTable.addRow(formatSize(length), item);
+      }
     }
   }
 
